@@ -60,6 +60,14 @@ body {
 .spectator-help { color: var(--muted); font-size: 9px; }
 .achievement-toast { position: absolute; z-index: 6; top: 50%; left: 50%; padding: 12px 18px; border: 1px solid rgba(168,243,109,.5); border-radius: 6px; background: rgba(7,16,25,.9); box-shadow: 0 12px 40px rgba(0,0,0,.3); color: var(--accent); transform: translate(-50%, -50%); font: 600 13px 'Space Grotesk', sans-serif; animation: toast-pop .35s ease both; }
 @keyframes toast-pop { from { opacity: 0; transform: translate(-50%, -42%) scale(.95); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+.kill-feed { position: absolute; z-index: 2; top: 50%; left: clamp(20px, 4vw, 56px); width: min(230px, calc(100vw - 40px)); transform: translateY(-50%); pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+.kill-feed[hidden] { display: none; }
+.kill-feed ol { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.kill-feed li { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px; align-items: center; font: 10px 'DM Mono', monospace; }
+.kill-feed .killer, .kill-feed .victim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kill-feed .killer { color: var(--accent); text-align: right; }
+.kill-feed .elimination-label { color: var(--muted); font-size: 9px; }
+.kill-feed .victim { color: var(--ink); }
 
 .brand-lockup, .score-panel, .leaderboard, .score-counter, .status-pill, .cursor-hint { position: absolute; z-index: 2; }
 .brand-lockup {

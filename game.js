@@ -6,6 +6,8 @@ const startForm = document.getElementById('startForm');
 const nicknameInput = document.getElementById('nickname');
 const respawnButton = document.getElementById('respawnButton');
 const leaderboardList = document.getElementById('leaderboardList');
+const killFeed = document.getElementById('killFeed');
+const killFeedList = document.getElementById('killFeedList');
 const massValue = document.getElementById('massValue');
 const healthValue = document.getElementById('healthValue');
 const scoreMass = document.getElementById('scoreMass');
@@ -78,6 +80,7 @@ const allianceOffers = [];
 const particles = [];
 const floatingText = [];
 const bots = [];
+const killFeedEntries = [];
 const TEAMS = [{ name: 'Red', color: '#ff6961' }, { name: 'Green', color: '#77dd77' }, { name: 'Blue', color: '#70a7ff' }];
 const player = { id: 'player', name: 'James', color: `hsl(${Math.floor(Math.random() * 360)} 82% 62%)`, skin: 'neon', eaten: 0, splitCooldown: 0, splitKills: 0, kills: 0, streak: 0, evolution: 1, controlledCell: null, betrayalUntil: 0 };
 const pointer = { x: innerWidth / 2, y: innerHeight / 2, active: false };
@@ -188,10 +191,11 @@ function setupBots() {
   for (let index = 0; index < botTarget; index += 1) { const team = TEAMS[index % 3]; const owner = { id: `bot-${index}`, name: BOT_NAMES[index % BOT_NAMES.length], color: gameMode === 'teams' ? team.color : randomColor(), skin: randomSkin(), tactic: Math.random(), team: gameMode === 'teams' ? team.name : null }; bots.push(owner); const spawn = spawnPoint(); createCell(owner, spawn.x, spawn.y, 15 + Math.random() * 28); }
 }
 function startGame() {
+  clearKillFeed();
   worldSize = arenaSizeSelect.value; botTarget = Number(botCountSelect.value); WORLD.width = worldSize === 'small' ? 11500 : worldSize === 'large' ? 20000 : 15000; WORLD.height = worldSize === 'small' ? 7800 : worldSize === 'large' ? 13000 : 10000;
     player.name = nicknameInput.value.trim().slice(0, 14) || 'James'; player.color = randomColor(); player.skin = skinSelect.value; player.splitKills = 0; gameMode = modeSelect.value; arenaLayout = layoutSelect.value; manualZoom = null; player.team = gameMode === 'teams' ? TEAMS[0].name : null; if (gameMode === 'teams') player.color = TEAMS[0].color; document.body.dataset.theme = themeSelect.value; cells.length = 0; ejectedMass.length = 0; particles.length = 0; floatingText.length = 0; mothercells.length = 0; alliances.length = 0; allianceOffers.length = 0; pendingAllianceOffer = null; player.betrayalUntil = 0; weather.type = 'clear'; weather.remaining = 28; selectedCell = null; resetFood(); resetArena(); match.startedAt = performance.now(); match.durationMinutes = gameMode === 'timed' ? Number(timedDurationSelect.value) || 15 : 0; match.peakMass = 12; match.kills = 0; match.food = 0; match.viruses = 0; achievements.clear(); spectatorFocus = null; spectatorFree = false; resetPlayer(); setupBots(); if (gameMode === 'experimental') for (let index = 0; index < 8; index += 1) createMothercell(); gameState = 'playing'; sessionStorage.setItem(ACTIVE_MATCH_KEY, '1'); spectatorBar.hidden = true; menuScreen.hidden = true; gameOverScreen.hidden = true; startAudio();
 }
-function startSpectator() { gameMode = 'ffa'; cells.length = 0; ejectedMass.length = 0; resetArena(); setupBots(); spectatorFocus = bots[0]; spectatorFree = false; gameState = 'spectator'; menuScreen.hidden = true; gameOverScreen.hidden = true; spectatorBar.hidden = false; }
+function startSpectator() { clearKillFeed(); gameMode = 'ffa'; cells.length = 0; ejectedMass.length = 0; resetArena(); setupBots(); spectatorFocus = bots[0]; spectatorFree = false; gameState = 'spectator'; menuScreen.hidden = true; gameOverScreen.hidden = true; spectatorBar.hidden = false; }
 function handoffPlayerControl() { const survivor = ownedCells(player).sort((first, second) => second.targetMass - first.targetMass)[0]; if (!survivor) return false; for (const cell of ownedCells(player)) cell.aiControlled = cell !== survivor; survivor.aiControlled = false; player.controlledCell = survivor; selectedCell = null; emitBurst(survivor.x, survivor.y, player.color, 18, 150); addFloatingText(survivor.x, survivor.y, 'CONTROL TRANSFERRED', '#ffffff'); return true; }
 function unlockAchievement(id, title) { if (achievements.has(id)) return; achievements.add(id); achievementToast.textContent = `Achievement unlocked: ${title}`; achievementToast.hidden = false; setTimeout(() => { achievementToast.hidden = true; }, 2600); }
 function applyPowerup(cell, orb) { if (orb.type === 'speed') cell.speedBoost = 7; if (orb.type === 'magnet') cell.magnet = 8; if (orb.type === 'merge') { cell.instantMerge = true; for (const sibling of ownedCells(cell.owner)) sibling.mergeReadyAt = 0; } if (orb.type === 'resistance') cell.gasResistance = .7; if (orb.type === 'invisibility') cell.invisible = 8; const labels = { speed: 'SPEED SURGE', magnet: 'MASS MAGNET', merge: 'INSTANT MERGE', resistance: 'GAS RESISTANCE', invisibility: 'INVISIBLE' }; emitBurst(orb.x, orb.y, '#ffdc70', 16, 180); addFloatingText(cell.x, cell.y, labels[orb.type], '#ffdc70'); playSound('eat', .8); }
@@ -282,6 +286,27 @@ function applyWorldForces(cell, delta) {
   return false;
 }
 function removeCell(cell) { const index = cells.indexOf(cell); if (index >= 0) cells.splice(index, 1); }
+function clearKillFeed() { killFeedEntries.length = 0; killFeedList.replaceChildren(); killFeed.hidden = true; }
+function recordElimination(killer, victim) {
+  if (gameMode === 'timed') return;
+  killFeedEntries.unshift({ killer: killer.name, victim: victim.name });
+  killFeedEntries.length = Math.min(killFeedEntries.length, 5);
+  killFeedList.replaceChildren(...killFeedEntries.map((entry) => {
+    const item = document.createElement('li');
+    const killerName = document.createElement('span');
+    const label = document.createElement('span');
+    const victimName = document.createElement('span');
+    killerName.className = 'killer';
+    killerName.textContent = entry.killer;
+    label.className = 'elimination-label';
+    label.textContent = 'eliminated';
+    victimName.className = 'victim';
+    victimName.textContent = entry.victim;
+    item.append(killerName, label, victimName);
+    return item;
+  }));
+  killFeed.hidden = false;
+}
 function applyFood(cell) {
   for (let index = food.length - 1; index >= 0; index -= 1) {
     const pellet = food[index];
@@ -306,7 +331,7 @@ function consumeCells() {
     for (let preyIndex = cells.length - 1; preyIndex >= 0; preyIndex -= 1) {
       const prey = cells[preyIndex];
       if (predator === prey || predator.owner === prey.owner || allianceBetween(predator.owner, prey.owner) || (gameMode === 'teams' && predator.owner.team && predator.owner.team === prey.owner.team) || predator.mass < prey.mass * 1.1) continue;
-      if (distanceBetween(predator, prey) < predator.radius - prey.radius * .3) { const growth = prey.targetMass; predator.targetMass += growth; if (predator.owner === player) { player.eaten += 1; player.kills += 1; player.streak += 1; match.kills += 1; updateEvolution(); if (ownedCells(player).length > 1) { player.splitKills += 1; if (player.splitKills >= 10) unlockAchievement('split-specialist', 'Split Specialist'); } } const wasControlled = prey === player.controlledCell; emitBurst(prey.x, prey.y, prey.color, 12, 160); addFloatingText(predator.x, predator.y, `+${Math.floor(growth)}${predator.owner === player ? ` STREAK ${player.streak}` : ''}`); playSound('eat'); removeCell(prey); if (wasControlled && !handoffPlayerControl()) endGame('loss'); break; }
+      if (distanceBetween(predator, prey) < predator.radius - prey.radius * .3) { const growth = prey.targetMass; predator.targetMass += growth; if (predator.owner === player) { player.eaten += 1; player.kills += 1; player.streak += 1; match.kills += 1; updateEvolution(); if (ownedCells(player).length > 1) { player.splitKills += 1; if (player.splitKills >= 10) unlockAchievement('split-specialist', 'Split Specialist'); } } const wasControlled = prey === player.controlledCell; emitBurst(prey.x, prey.y, prey.color, 12, 160); addFloatingText(predator.x, predator.y, `+${Math.floor(growth)}${predator.owner === player ? ` STREAK ${player.streak}` : ''}`); playSound('eat'); removeCell(prey); if (!ownedCells(prey.owner).length) recordElimination(predator.owner, prey.owner); if (wasControlled && !handoffPlayerControl()) endGame('loss'); break; }
     }
   }
   for (const cell of cells.slice()) for (const virus of viruses) if (cell.radius > virus.radius * 1.1 && distanceBetween(cell, virus) < cell.radius - virus.radius * .2) { if (cell.owner === player) { match.viruses += 1; if (match.viruses >= 3) unlockAchievement('virus-buster', 'Virus Buster'); } popCell(cell, virus); break; }
