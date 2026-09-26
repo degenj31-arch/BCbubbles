@@ -35,6 +35,7 @@ const achievementToast = document.getElementById('achievementToast');
 const layoutSelect = document.getElementById('layout');
 const botCountSelect = document.getElementById('botCount');
 const arenaSizeSelect = document.getElementById('arenaSize');
+const companionOffspringToggle = document.getElementById('companionOffspring');
 const streakValue = document.getElementById('streakValue');
 const evolutionValue = document.getElementById('evolutionValue');
 const teamPanel = document.getElementById('teamPanel');
@@ -98,6 +99,7 @@ let selectedCell = null;
 let previousPointer = { x: 0, y: 0 };
 const match = { startedAt: 0, durationMinutes: 0, peakMass: 12, kills: 0, food: 0, viruses: 0 };
 let arenaLayout = 'open';
+let companionOffspringEnabled = false;
 let pendingAllianceOffer = null;
 let manualZoom = null;
 const achievements = new Set();
@@ -171,13 +173,68 @@ function randomPowerup() { const spawn = spawnPoint(120); const types = ['speed'
 for (let index = 0; index < 12; index += 1) powerups.push(randomPowerup());
 function createMothercell() { const spawn = spawnPoint(300); mothercells.push({ x: spawn.x, y: spawn.y, radius: 62, timer: Math.random() * 2, pulse: Math.random() * 6 }); }
 
+function offspringOptions(parent, side) { return companionOffspringEnabled ? { companionStartedAt: performance.now() / 1000, companionParent: parent, companionSide: side } : {}; }
 function createCell(owner, x, y, mass, options = {}) {
   const radius = radiusForMass(mass);
-  const cell = { owner, name: options.name || owner.name, color: options.color || owner.color, skin: options.skin || owner.skin || 'neon', aiControlled: options.aiControlled || false, x, y, visualX: x, visualY: y, radius, visualRadius: radius, mass, targetMass: mass, health: 100, vx: 0, vy: 0, impulseX: 0, impulseY: 0, state: 'forage', target: null, stateTime: 0, mergeReadyAt: options.mergeReadyAt || 0, decayNotice: 0, actionCooldown: 0, dashCooldown: 0, portalCooldown: 0, speedBoost: 0, magnet: 0, gasResistance: 0, invisible: 0, instantMerge: false, evolution: owner === player ? player.evolution : 1 };
+  const cell = { owner, name: options.name || owner.name, color: options.color || owner.color, skin: options.skin || owner.skin || 'neon', aiControlled: options.aiControlled || false, x, y, visualX: x, visualY: y, radius, visualRadius: radius, mass, targetMass: mass, health: 100, vx: 0, vy: 0, impulseX: 0, impulseY: 0, state: 'forage', target: null, stateTime: 0, mergeReadyAt: options.mergeReadyAt || 0, companionStartedAt: options.companionStartedAt ?? null, companionParent: options.companionParent || null, companionSide: options.companionSide || 1, companionPhase: options.companionStartedAt == null ? null : 'helper', decayNotice: 0, actionCooldown: 0, dashCooldown: 0, portalCooldown: 0, speedBoost: 0, magnet: 0, gasResistance: 0, invisible: 0, instantMerge: false, evolution: owner === player ? player.evolution : 1 };
   cells.push(cell);
   return cell;
 }
 function ownedCells(owner) { return cells.filter((cell) => cell.owner === owner); }
+function companionLeader(cell) {
+  if (cell.companionParent && cell.companionParent.owner === cell.owner && cells.includes(cell.companionParent)) return cell.companionParent;
+  return ownedCells(cell.owner).filter((candidate) => candidate !== cell).sort((first, second) => second.targetMass - first.targetMass)[0] || null;
+}
+function companionDirection(cell, leader, mirrorInput) {
+  const spacing = (leader.radius + cell.radius) * .82 + 12;
+  const targetX = leader.x + spacing * cell.companionSide;
+  const targetY = leader.y;
+  const offsetX = targetX - cell.x;
+  const offsetY = targetY - cell.y;
+  const offsetDistance = Math.hypot(offsetX, offsetY);
+  let directionX = 0;
+  let directionY = 0;
+  if (mirrorInput && pointer.active) {
+    const inputX = pointer.x - innerWidth / 2;
+    const inputY = pointer.y - innerHeight / 2;
+    const inputDistance = Math.hypot(inputX, inputY);
+    if (inputDistance) { directionX = inputX / inputDistance; directionY = inputY / inputDistance; }
+  }
+  if (offsetDistance > 35) {
+    const pull = clamp((offsetDistance - 35) / 150, 0, 1);
+    directionX += offsetX / offsetDistance * pull;
+    directionY += offsetY / offsetDistance * pull;
+  }
+  const directionLength = Math.hypot(directionX, directionY);
+  return directionLength ? { x: directionX / directionLength, y: directionY / directionLength } : { x: 0, y: 0 };
+}
+function updateCompanionOffspring(now) {
+  if (!companionOffspringEnabled) return;
+  for (const cell of cells.slice()) {
+    if (cell.companionStartedAt === null) continue;
+    const elapsed = now - cell.companionStartedAt;
+    if (elapsed >= 180) {
+      const leader = companionLeader(cell);
+      if (leader) {
+        leader.targetMass += cell.targetMass;
+        addFloatingText(leader.x, leader.y, `RECOMBINED +${Math.floor(cell.targetMass)}`, '#a8f36d');
+        emitBurst(cell.x, cell.y, cell.color, 12, 120);
+        if (cell === player.controlledCell) { player.controlledCell = leader; leader.aiControlled = false; }
+        if (cell === selectedCell) selectedCell = null;
+        removeCell(cell);
+      } else {
+        cell.companionStartedAt = null;
+        cell.companionParent = null;
+        cell.companionPhase = null;
+      }
+    } else if (elapsed >= 60 && cell.companionPhase === 'helper') {
+      cell.companionPhase = 'paired';
+      cell.aiControlled = cell.owner === player;
+      cell.stateTime = 0;
+      addFloatingText(cell.x, cell.y, 'COMPANION PHASE', '#70a7ff');
+    }
+  }
+}
 function centroid(owner) {
   const pieces = ownedCells(owner);
   if (!pieces.length) return { x: WORLD.width / 2, y: WORLD.height / 2 };
@@ -192,6 +249,7 @@ function setupBots() {
 }
 function startGame() {
   clearKillFeed();
+  companionOffspringEnabled = companionOffspringToggle.checked;
   worldSize = arenaSizeSelect.value; botTarget = Number(botCountSelect.value); WORLD.width = worldSize === 'small' ? 11500 : worldSize === 'large' ? 20000 : 15000; WORLD.height = worldSize === 'small' ? 7800 : worldSize === 'large' ? 13000 : 10000;
     player.name = nicknameInput.value.trim().slice(0, 14) || 'James'; player.color = randomColor(); player.skin = skinSelect.value; player.splitKills = 0; gameMode = modeSelect.value; arenaLayout = layoutSelect.value; manualZoom = null; player.team = gameMode === 'teams' ? TEAMS[0].name : null; if (gameMode === 'teams') player.color = TEAMS[0].color; document.body.dataset.theme = themeSelect.value; cells.length = 0; ejectedMass.length = 0; particles.length = 0; floatingText.length = 0; mothercells.length = 0; alliances.length = 0; allianceOffers.length = 0; pendingAllianceOffer = null; player.betrayalUntil = 0; weather.type = 'clear'; weather.remaining = 28; selectedCell = null; resetFood(); resetArena(); match.startedAt = performance.now(); match.durationMinutes = gameMode === 'timed' ? Number(timedDurationSelect.value) || 15 : 0; match.peakMass = 12; match.kills = 0; match.food = 0; match.viruses = 0; achievements.clear(); spectatorFocus = null; spectatorFree = false; resetPlayer(); setupBots(); if (gameMode === 'experimental') for (let index = 0; index < 8; index += 1) createMothercell(); gameState = 'playing'; sessionStorage.setItem(ACTIVE_MATCH_KEY, '1'); spectatorBar.hidden = true; menuScreen.hidden = true; gameOverScreen.hidden = true; startAudio();
 }
@@ -358,7 +416,7 @@ function botStrike(cell) {
   const angle = Math.atan2(cell.target.y - cell.y, cell.target.x - cell.x);
   if (distanceBetween(cell, cell.target) < 360) {
     const halfMass = cell.targetMass / 2; cell.mass = halfMass; cell.targetMass = halfMass;
-    const half = createCell(cell.owner, cell.x + Math.cos(angle) * cell.radius, cell.y + Math.sin(angle) * cell.radius, halfMass, { aiControlled: cell.owner === player, mergeReadyAt: performance.now() / 1000 + 8 });
+    const half = createCell(cell.owner, cell.x + Math.cos(angle) * cell.radius, cell.y + Math.sin(angle) * cell.radius, halfMass, { aiControlled: cell.owner === player, mergeReadyAt: performance.now() / 1000 + 8, ...offspringOptions(cell, 1) });
     half.impulseX = Math.cos(angle) * 430; half.impulseY = Math.sin(angle) * 430; emitBurst(cell.x, cell.y, cell.color, 12, 190); playSound('split', .35);
   } else if (distanceBetween(cell, cell.target) < 520) launchMass(cell, angle);
   cell.actionCooldown = .9;
@@ -373,7 +431,7 @@ function splitPlayer() {
     const halfMass = cell.targetMass / 2 - SPLIT_COST;
     cell.mass = halfMass; cell.targetMass = halfMass;
     const offset = cell.radius * .8;
-    const half = createCell(player, cell.x + Math.cos(angle) * offset, cell.y + Math.sin(angle) * offset, halfMass, { aiControlled: true, mergeReadyAt: performance.now() / 1000 + 8 });
+    const half = createCell(player, cell.x + Math.cos(angle) * offset, cell.y + Math.sin(angle) * offset, halfMass, { aiControlled: true, mergeReadyAt: performance.now() / 1000 + 8, ...offspringOptions(cell, splitCount % 2 ? 1 : -1) });
     half.impulseX = Math.cos(angle) * 460; half.impulseY = Math.sin(angle) * 460; splitCount += 1;
   }
   if (splitCount) { player.splitCooldown = .65; emitBurst(ownedCells(player)[0]?.x || WORLD.width / 2, ownedCells(player)[0]?.y || WORLD.height / 2, player.color, 20, 220); addFloatingText(centroid(player).x, centroid(player).y, 'SPLIT', '#ffffff'); playSound('split'); }
@@ -408,17 +466,25 @@ function update(delta, now) {
   updateHazards(delta);
   updateWeather(delta);
   resolveAllianceOffers(now);
+  updateCompanionOffspring(now);
   const playerCenter = centroid(player); player.splitCooldown = Math.max(0, player.splitCooldown - delta);
   for (const cell of cells.slice()) {
     let directionX = 0; let directionY = 0;
-    if (cell.owner === player && cell === player.controlledCell) {
+    const pairedLeader = cell.companionPhase === 'paired' ? companionLeader(cell) : null;
+    if (pairedLeader) {
+      const direction = companionDirection(cell, pairedLeader, cell.owner === player);
+      directionX = direction.x; directionY = direction.y;
+      cell.target = pairedLeader;
+      cell.state = 'follow';
+      if (cell.owner === player) cell.aiControlled = true;
+    } else if (cell.owner === player && cell === player.controlledCell) {
       const targetX = cell.x + (pointer.active ? pointer.x - innerWidth / 2 : 0) / camera.zoom; const targetY = cell.y + (pointer.active ? pointer.y - innerHeight / 2 : 0) / camera.zoom; const distance = Math.hypot(targetX - cell.x, targetY - cell.y); if (distance) { directionX = (targetX - cell.x) / distance; directionY = (targetY - cell.y) / distance; }
     } else if (cell.owner !== player) {
       cell.stateTime -= delta; if (cell.stateTime <= 0 || !cell.target) { const decision = chooseBotTarget(cell); cell.state = decision.state; cell.target = decision.target; cell.stateTime = .35 + Math.random() * .6; }
       if (cell.target) { const targetX = cell.state === 'flee' ? cell.x * 2 - cell.target.x : cell.target.x; const targetY = cell.state === 'flee' ? cell.y * 2 - cell.target.y : cell.target.y; const distance = Math.hypot(targetX - cell.x, targetY - cell.y); if (distance) { directionX = (targetX - cell.x) / distance; directionY = (targetY - cell.y) / distance; } }
-      botStrike(cell);
+      if (cell.companionPhase !== 'paired') botStrike(cell);
     }
-    if (cell.owner === player && cell.aiControlled) {
+    if (cell.owner === player && cell.aiControlled && !pairedLeader) {
       cell.stateTime -= delta;
       if (cell.stateTime <= 0 || !cell.target) { const decision = chooseBotTarget(cell); cell.state = decision.state; cell.target = decision.target; cell.stateTime = .5 + Math.random(); }
       if (cell.target) { const targetX = cell.state === 'flee' ? cell.x * 2 - cell.target.x : cell.target.x; const targetY = cell.state === 'flee' ? cell.y * 2 - cell.target.y : cell.target.y; const distance = Math.hypot(targetX - cell.x, targetY - cell.y); if (distance) { directionX = (targetX - cell.x) / distance; directionY = (targetY - cell.y) / distance; } }

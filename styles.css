@@ -42,6 +42,9 @@ body {
 .menu-options label:nth-of-type(3) { grid-column: 1; grid-row: 3; }
 .menu-options select:nth-of-type(3) { grid-column: 1; grid-row: 4; }
 .menu-options select:focus { outline: 1px solid var(--accent); }
+.companion-toggle { display: flex; grid-column: 1 / -1; align-items: center; gap: 9px; margin-top: 5px; cursor: pointer; }
+.menu-panel .companion-toggle input { width: 15px; height: 15px; margin: 0; padding: 0; accent-color: var(--accent); }
+.companion-toggle span { color: var(--ink); }
 .menu-panel button { margin-top: 9px; padding: 13px 16px; border: 0; border-radius: 6px; background: var(--accent); color: #071019; cursor: pointer; font: 600 14px 'Space Grotesk', sans-serif; }
 .secondary-button { width: 100%; margin-top: 8px !important; border: 1px solid var(--line) !important; background: transparent !important; color: var(--ink) !important; }
 .menu-panel button span { float: right; font-size: 18px; line-height: 12px; }
